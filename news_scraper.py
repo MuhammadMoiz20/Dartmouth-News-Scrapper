@@ -71,6 +71,7 @@ class DartmouthNewsScraper:
         os.makedirs('pdfs', exist_ok=True)
         os.makedirs('images', exist_ok=True)
         os.makedirs('json', exist_ok=True)  # New directory for JSON data
+        os.makedirs('fonts', exist_ok=True)  # Directory for fonts
 
     def fetch_articles(self):
         """Fetch all articles within the specified date range."""
@@ -482,7 +483,7 @@ class DartmouthNewsScraper:
                 self.set_y(-25)
                 
                 # Set font for footer
-                self.set_font('DejaVu', '', 8)
+                self.set_font('Helvetica', '', 8)
                 
                 # Add page number
                 self.cell(0, 10, f'Page {self.page_no()}', 0, 1, 'C')
@@ -493,12 +494,12 @@ class DartmouthNewsScraper:
         
         print("\nCreating PDF document...")
         pdf = PDFWithHeaderFooter()
-        # Add a Unicode font
-        pdf.add_font('DejaVu', '', os.path.join('fonts', 'Arial.ttf'), uni=True)
+        # Use built-in Helvetica font which doesn't require external font files
+        pdf.set_font('Helvetica', '', 14)
         pdf.add_page()
         
-        # Set up fonts - use Unicode-compatible font
-        pdf.set_font('DejaVu', '', 20)
+        # Set up fonts - use standard font
+        pdf.set_font('Helvetica', '', 20)
         
         # Add header
         pdf.cell(0, 10, 'DARTMOUTH NEWS', 0, 1, 'C')
@@ -506,12 +507,12 @@ class DartmouthNewsScraper:
         
         # Add title
         title = self.clean_text(article_data['title'])
-        pdf.set_font('DejaVu', '', 16)
+        pdf.set_font('Helvetica', '', 16)
         pdf.multi_cell(0, 10, title, 0, 'C')
         pdf.ln(5)
         
         # Add author and date
-        pdf.set_font('DejaVu', '', 12)
+        pdf.set_font('Helvetica', '', 12)
         author = self.clean_text(article_data.get('news_author', 'Unknown Author'))
         
         # Parse and format the date
@@ -537,7 +538,7 @@ class DartmouthNewsScraper:
         # Add subtitle if available
         if article_data.get('news_subtitle'):
             subtitle = self.clean_text(BeautifulSoup(article_data['news_subtitle']['value'], 'html.parser').get_text())
-            pdf.set_font('DejaVu', 'I', 12)
+            pdf.set_font('Helvetica', 'I', 12)
             pdf.multi_cell(0, 10, subtitle, 0, 'C')
             pdf.ln(10)
         
@@ -589,7 +590,7 @@ class DartmouthNewsScraper:
                     
                     if caption:
                         print(f"Adding caption: {caption[:50]}...")
-                        pdf.set_font('DejaVu', 'I', 10)
+                        pdf.set_font('Helvetica', 'I', 10)
                         pdf.multi_cell(0, 5, caption, 0, 'C')
                         pdf.ln(5)
                     
@@ -602,7 +603,7 @@ class DartmouthNewsScraper:
         # Add body content
         if article_data.get('article_body'):
             body_text = self.clean_text(BeautifulSoup(article_data['article_body']['value'], 'html.parser').get_text())
-            pdf.set_font('DejaVu', '', 12)
+            pdf.set_font('Helvetica', '', 12)
             pdf.multi_cell(0, 10, body_text)
         
         # Generate PDF filename with date prefix
