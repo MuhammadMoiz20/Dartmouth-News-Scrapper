@@ -494,7 +494,7 @@ class DartmouthNewsScraper:
         print("\nCreating PDF document...")
         pdf = PDFWithHeaderFooter()
         # Add a Unicode font
-        pdf.add_font('DejaVu', '', '/System/Library/Fonts/Supplemental/Arial Unicode.ttf', uni=True)
+        pdf.add_font('DejaVu', '', os.path.join('fonts', 'Arial.ttf'), uni=True)
         pdf.add_page()
         
         # Set up fonts - use Unicode-compatible font
