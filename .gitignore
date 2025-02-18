@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project specific
+pdfs/
+images/
+json/
+cache/
+scraper.log
+.DS_Store
+
+# Keep directories but not their contents
+!pdfs/.gitkeep
+!images/.gitkeep
+!json/.gitkeep
+!cache/.gitkeep
