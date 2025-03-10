@@ -165,6 +165,17 @@ class DartmouthNewsScraper:
         self.image_hashes.add(image_hash)
         return False
 
+    def get_image_resolution(self, image_path):
+        """Get the resolution (width x height) of an image."""
+        try:
+            with Image.open(image_path) as img:
+                width, height = img.size
+                resolution = width * height
+                return resolution
+        except Exception as e:
+            self.logger.warning(f"Error getting image resolution: {str(e)}")
+            return 0
+            
     def download_image(self, url, filename):
         """Download an image and save it to the images directory."""
         try:
@@ -177,6 +188,11 @@ class DartmouthNewsScraper:
                 "Accept-Language": "en-US,en;q=0.9",
                 "Referer": "https://home.dartmouth.edu/"
             }
+
+            # Check if the URL is valid
+            if not url.startswith("http"):
+                self.logger.warning(f"Invalid URL: {url}")
+                return None
 
             response = self.session.get(url, verify=False, headers=headers, timeout=15)
             print(f"Response status code: {response.status_code}")
@@ -253,6 +269,92 @@ class DartmouthNewsScraper:
                             unique_images.append(content)
         print(f"\nFound {len(unique_images)} image(s) via meta tags")
         return unique_images
+        
+    def extract_images_from_html(self, article_data):
+        """
+        Extract image URLs from the article body HTML content.
+        This handles both absolute and relative image URLs.
+        """
+        unique_images = []
+        if not article_data.get("article_body") or not article_data["article_body"].get("value"):
+            return unique_images
+            
+        html_content = article_data["article_body"]["value"]
+        # Also check processed content if available
+        if article_data["article_body"].get("processed"):
+            html_content += article_data["article_body"]["processed"]
+            
+        soup = BeautifulSoup(html_content, "html.parser")
+        
+        # Find all img tags
+        for img in soup.find_all("img"):
+            src = img.get("src")
+            if src:
+                # Handle relative URLs
+                if src.startswith("/"):
+                    src = urljoin(self.base_url, src)
+                unique_images.append(src)
+        
+        # Find all srcset attributes and extract URLs
+        for tag in soup.find_all(lambda tag: tag.has_attr("srcset")):
+            srcset = tag.get("srcset")
+            if srcset:
+                # Extract URLs from srcset (format: "url1 1x, url2 2x, ...") 
+                for src_item in srcset.split(","):
+                    src = src_item.strip().split(" ")[0]
+                    if src:
+                        if src.startswith("/"):
+                            src = urljoin(self.base_url, src)
+                        unique_images.append(src)
+        
+        # Find all data-entity-uuid attributes in drupal-media tags
+        for media_tag in soup.find_all("drupal-media"):
+            uuid = media_tag.get("data-entity-uuid")
+            jsonapi_url = media_tag.get("data-entity-jsonapi-url")
+            
+            if jsonapi_url:
+                # If the JSON API URL is provided, use it directly
+                try:
+                    response = self.session.get(jsonapi_url, verify=False)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get("field_media_image") and data["field_media_image"].get("uri", {}).get("url"):
+                            img_url = data["field_media_image"]["uri"]["url"]
+                            if img_url.startswith("/"):
+                                img_url = urljoin(self.base_url, img_url)
+                            unique_images.append(img_url)
+                except Exception as e:
+                    self.logger.warning(f"Error fetching media JSON: {str(e)}")
+        
+        # Also look for images in div tags with style attributes containing background-image
+        for div in soup.find_all("div", style=True):
+            style = div.get("style", "")
+            if "background-image" in style:
+                # Extract URL from background-image: url('...')
+                match = re.search(r"background-image:\s*url\(['\"]{0,1}([^'\"\)]+)['\"]{0,1}\)", style)
+                if match:
+                    src = match.group(1)
+                    if src.startswith("/"):
+                        src = urljoin(self.base_url, src)
+                    unique_images.append(src)
+        
+        # Filter out common non-image URLs and icon placeholders
+        filtered_images = []
+        for img_url in unique_images:
+            # Skip icon placeholders and non-image URLs
+            if any(x in img_url.lower() for x in [
+                "image-x-generic.png", 
+                "default/image-", 
+                "icon-", 
+                "placeholder", 
+                "transparent.gif",
+                "blank.gif"
+            ]):
+                continue
+            filtered_images.append(img_url)
+        
+        print(f"Found {len(filtered_images)} image(s) in article body HTML")
+        return filtered_images
 
     def clean_text(self, text):
         """Clean text by replacing problematic characters with their closest ASCII equivalents."""
@@ -339,15 +441,27 @@ class DartmouthNewsScraper:
             pdf.multi_cell(0, 10, subtitle, 0, "C")
             pdf.ln(10)
 
-        print(f"\nProcessing {len(image_files)} image(s) for PDF...")
+        # Use only the highest resolution image for the PDF
+        print(f"\nProcessing image for PDF...")
         if image_files:
-            for i, image_path in enumerate(image_files):
+            # Find the image with the highest resolution
+            highest_res_image = None
+            highest_resolution = 0
+            
+            for image_path in image_files:
+                if not os.path.exists(image_path):
+                    print(f"Image file not found: {image_path}")
+                    continue
+                    
+                resolution = self.get_image_resolution(image_path)
+                if resolution > highest_resolution:
+                    highest_resolution = resolution
+                    highest_res_image = image_path
+            
+            if highest_res_image:
                 try:
-                    if not os.path.exists(image_path):
-                        print(f"Image file not found: {image_path}")
-                        continue
-
-                    img = Image.open(image_path)
+                    print(f"Using highest resolution image: {highest_res_image}")
+                    img = Image.open(highest_res_image)
                     aspect = img.width / img.height
                     max_width = 190
                     max_height = 120
@@ -360,17 +474,18 @@ class DartmouthNewsScraper:
                         width = height * aspect
 
                     x = (210 - width) / 2
-                    pdf.image(image_path, x=x, w=width)
+                    pdf.image(highest_res_image, x=x, w=width)
                     pdf.ln(5)
 
+                    # Try to find a caption for the image
                     caption = None
-                    if i == 0 and "media_image_caption" in article_data:
+                    if "media_image_caption" in article_data:
                         caption = self.clean_text(
                             BeautifulSoup(article_data["media_image_caption"], "html.parser").get_text()
                         )
-                    elif "image_captions" in article_data and i < len(article_data["image_captions"]):
+                    elif "image_captions" in article_data and len(article_data["image_captions"]) > 0:
                         caption = self.clean_text(
-                            BeautifulSoup(article_data["image_captions"][i], "html.parser").get_text()
+                            BeautifulSoup(article_data["image_captions"][0], "html.parser").get_text()
                         )
 
                     if caption:
@@ -379,7 +494,7 @@ class DartmouthNewsScraper:
                         pdf.ln(5)
 
                 except Exception as e:
-                    print(f"Error processing image {image_path}: {str(e)}")
+                    print(f"Error processing image {highest_res_image}: {str(e)}")
             pdf.ln(10)
 
         if article_data.get("article_body"):
@@ -432,23 +547,48 @@ class DartmouthNewsScraper:
 
             print(f"\nProcessing article: {article_data['title']}")
 
-            # Extract image URLs solely from meta tags.
-            image_urls = self.extract_image_urls(article_data)
-            print(f"Found {len(image_urls)} image(s) in article")
+            # Extract image URLs from meta tags and article body HTML
+            meta_image_urls = self.extract_image_urls(article_data)
+            html_image_urls = self.extract_images_from_html(article_data)
+            
+            # Combine and deduplicate image URLs
+            # Prioritize HTML images over meta images (which are often just default images)
+            if html_image_urls:
+                image_urls = html_image_urls
+                # Only add meta images if we don't have any HTML images
+                if not image_urls and meta_image_urls:
+                    image_urls = meta_image_urls
+            else:
+                image_urls = meta_image_urls
+            
+            print(f"Found {len(image_urls)} total unique image(s) in article")
 
             image_files = []
             skipped_count = 0
 
             for i, url in enumerate(image_urls):
-                filename = os.path.join("images", f"{i}_{os.path.basename(url.split('?')[0])}")
-                downloaded_file = self.download_image(url, filename)
-                if downloaded_file:
-                    image_files.append(downloaded_file)
-                else:
+                try:
+                    # Create a more reliable filename
+                    base_name = os.path.basename(url.split('?')[0])
+                    # If the base_name is empty or just a file extension, use a generic name
+                    if not base_name or base_name.startswith(".") or len(base_name) < 3:
+                        base_name = f"image_{i}.jpg"
+                    
+                    filename = os.path.join("images", f"{i}_{base_name}")
+                    downloaded_file = self.download_image(url, filename)
+                    if downloaded_file:
+                        image_files.append(downloaded_file)
+                    else:
+                        skipped_count += 1
+                        print(f"Skipped image {url} (duplicate or download failed)")
+                except Exception as e:
                     skipped_count += 1
-                    print(f"Skipped image {url} (duplicate or download failed)")
+                    print(f"Error processing image URL {url}: {str(e)}")
 
+            # Even if we download multiple images, we'll only use the highest resolution one in the PDF
             print(f"Successfully downloaded {len(image_files)} image(s), skipped {skipped_count} duplicate/failures")
+            if len(image_files) > 1:
+                print("Note: Only the highest resolution image will be used in the PDF")
             return self.create_pdf(article_data, image_files)
         except Exception as e:
             print(f"Error processing article: {str(e)}")
