@@ -358,6 +358,9 @@ class DartmouthNewsScraper:
 
     def clean_text(self, text):
         """Clean text by replacing problematic characters with their closest ASCII equivalents."""
+        if text is None:
+            return ""
+        
         replacements = {
             "’": "'",
             "‘": "'",
